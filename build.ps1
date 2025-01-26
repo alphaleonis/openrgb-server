@@ -9,7 +9,7 @@ param (
          
          try {            
             $versions = @(Get-GitLabTags | ForEach-Object { $_.Release })
-            return ($versions + 'latest') -like "$wordToComplete*" 
+            return ($versions + 'preview') -like "$wordToComplete*" 
          }
          catch {
             Write-Host "Error fetching tags for completion. $_"
@@ -38,7 +38,7 @@ if ($Push -and !$PAT) {
 $ErrorActionPreference = 'Stop'
 
 $dockerTags = @()
-if ($Version -ne 'latest') {
+if ($Version -ne 'preview') {
 
    # Fetch tags from GitLab API
    $tags = @(Get-GitLabTags)

@@ -6,8 +6,6 @@ RUN apt update && \
 RUN git clone https://gitlab.com/CalcProgrammer1/OpenRGB /app
 WORKDIR /app
 
-RUN mkdir -p /build
-
 ARG OPENRGB_VERSION
 RUN git fetch --tags && \
     if [ -z "$OPENRGB_VERSION" ]; then \
@@ -22,7 +20,8 @@ RUN git fetch --tags && \
 
 
 RUN qmake OpenRGB.pro
-RUN make -j8
+RUN make -j$(nproc)
+RUN /app/scripts/build-udev-rules.sh /app
 
 FROM debian:bookworm-slim
 
@@ -37,10 +36,13 @@ RUN apt update && \
     libqt5gui5 \
     tini
 
+
 RUN mkdir /config
 
 WORKDIR /app
 
+RUN mkdir -p /usr/lib/udev/rules.d 
 COPY --from=builder /app/openrgb .
+COPY --from=builder /app/60-openrgb.rules /usr/lib/udev/rules.d
 
 ENTRYPOINT [ "/usr/bin/tini", "--", "/app/openrgb", "--server", "--config", "/config" ]
