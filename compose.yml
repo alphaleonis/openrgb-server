@@ -1,0 +1,13 @@
+services: 
+  openrgb:
+    image: test
+    container_name: openrgb
+    ports:
+    - "6742:6742"
+    privileged: true
+    devices:
+    - "/dev/i2c-1:/dev/i2c-1"
+    restart: no
+    volumes:
+      - ./config:/config
+      

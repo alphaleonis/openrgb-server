@@ -1,74 +1,121 @@
-[CmdletBinding()]
-Param(
-    [Parameter(Position=0,Mandatory=$false,ValueFromRemainingArguments=$true)]
-    [string[]]$BuildArguments
+[CmdletBinding(DefaultParameterSetName = 'Build')]
+param (
+   [Parameter(Mandatory = $true, ParameterSetName = 'Build')]
+   [ValidateNotNullOrEmpty()]
+   [ArgumentCompleter({
+         param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+        
+         . $PSScriptRoot\build-vars.ps1
+         
+         try {            
+            $versions = @(Get-GitLabTags | ForEach-Object { $_.Release })
+            return ($versions + 'latest') -like "$wordToComplete*" 
+         }
+         catch {
+            Write-Host "Error fetching tags for completion. $_"
+            return @()
+         }
+      })]
+   [string] $Version,
+   [switch] $NoBuild,
+   [switch] $Push,
+   [string] $PAT
 )
 
-Write-Output "PowerShell $($PSVersionTable.PSEdition) version $($PSVersionTable.PSVersion)"
-
-Set-StrictMode -Version 2.0; $ErrorActionPreference = "Stop"; $ConfirmPreference = "None"; trap { Write-Error $_ -ErrorAction Continue; exit 1 }
-$PSScriptRoot = Split-Path $MyInvocation.MyCommand.Path -Parent
-
-###########################################################################
-# CONFIGURATION
-###########################################################################
-
-$BuildProjectFile = "$PSScriptRoot\build\_build.csproj"
-$TempDirectory = "$PSScriptRoot\\.nuke\temp"
-
-$DotNetGlobalFile = "$PSScriptRoot\\global.json"
-$DotNetInstallUrl = "https://dot.net/v1/dotnet-install.ps1"
-$DotNetChannel = "STS"
-
-$env:DOTNET_CLI_TELEMETRY_OPTOUT = 1
-$env:DOTNET_NOLOGO = 1
-
-###########################################################################
-# EXECUTION
-###########################################################################
-
-function ExecSafe([scriptblock] $cmd) {
-    & $cmd
-    if ($LASTEXITCODE) { exit $LASTEXITCODE }
+if ($Push -and !$PAT) {
+   if ($env:GHCR_PAT) {
+      $PAT = $env:GHCR_PAT
+   }
+   else {
+      Write-Error "The -Push switch requires a Personal Access Token (PAT) to be provided via the -PAT parameter or in the GHCR_PAT  environment variable."
+      exit 1
+   }
 }
 
-# If dotnet CLI is installed globally and it matches requested version, use for execution
-if ($null -ne (Get-Command "dotnet" -ErrorAction SilentlyContinue) -and `
-     $(dotnet --version) -and $LASTEXITCODE -eq 0) {
-    $env:DOTNET_EXE = (Get-Command "dotnet").Path
+
+. $PSScriptRoot\build-vars.ps1
+
+$ErrorActionPreference = 'Stop'
+
+$dockerTags = @()
+if ($Version -ne 'latest') {
+
+   # Fetch tags from GitLab API
+   $tags = @(Get-GitLabTags)
+   
+   # Search for the matching tag
+   $matchingTag = $tags | Where-Object { $_.Version -eq "$Version" }
+   
+   if (!$matchingTag) {
+      Write-Error "Release $Version not found in repository."
+      exit 1
+   }
+
+   # Determine if the matched tag is the latest release
+   $latestTag = $tags | Select-Object -First 1
+   if ($matchingTag.Name -eq $latestTag.Name) {
+      Write-Host "The specified version $Version is the latest release." -ForegroundColor Green
+      $dockerTags += 'latest'
+   }
+   else {
+      Write-Host "Latest release is $($latestTag.Version)" -ForegroundColor Yellow
+   }
+
+   $dockerTags += $Version
+   $tagName = $matchingTag.tag
+   Write-Host "Building image from tag $tagName" -ForegroundColor Green
 }
 else {
-    # Download install script
-    $DotNetInstallFile = "$TempDirectory\dotnet-install.ps1"
-    New-Item -ItemType Directory -Path $TempDirectory -Force | Out-Null
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    (New-Object System.Net.WebClient).DownloadFile($DotNetInstallUrl, $DotNetInstallFile)
-
-    # If global.json exists, load expected version
-    if (Test-Path $DotNetGlobalFile) {
-        $DotNetGlobal = $(Get-Content $DotNetGlobalFile | Out-String | ConvertFrom-Json)
-        if ($DotNetGlobal.PSObject.Properties["sdk"] -and $DotNetGlobal.sdk.PSObject.Properties["version"]) {
-            $DotNetVersion = $DotNetGlobal.sdk.version
-        }
-    }
-
-    # Install by channel or version
-    $DotNetDirectory = "$TempDirectory\dotnet-win"
-    if (!(Test-Path variable:DotNetVersion)) {
-        ExecSafe { & powershell $DotNetInstallFile -InstallDir $DotNetDirectory -Channel $DotNetChannel -NoPath }
-    } else {
-        ExecSafe { & powershell $DotNetInstallFile -InstallDir $DotNetDirectory -Version $DotNetVersion -NoPath }
-    }
-    $env:DOTNET_EXE = "$DotNetDirectory\dotnet.exe"
-    $env:PATH = "$DotNetDirectory;$env:PATH"
+   # Fetch information about the last commit on master, including the commit hash and date/time.
+   $commitInfo = Get-LastGitLabCommit
+   Write-Host "Building image from latest commit on master" -ForegroundColor Green
+   $dockerTags += 'latest-preview'
+   $dockerTags += "preview-$($commitInfo.created_at.ToString('yyyyMMdd-HHmmss'))"
+   $tagName = $null
 }
 
-Write-Output "Microsoft (R) .NET SDK version $(& $env:DOTNET_EXE --version)"
-
-if (Test-Path env:NUKE_ENTERPRISE_TOKEN) {
-    & $env:DOTNET_EXE nuget remove source "nuke-enterprise" > $null
-    & $env:DOTNET_EXE nuget add source "https://f.feedz.io/nuke/enterprise/nuget" --name "nuke-enterprise" --username "PAT" --password $env:NUKE_ENTERPRISE_TOKEN > $null
+# create an array consisting of elements "-t" and the tag names. Each tag name should be preceded by a "-t"
+$dargs = @()
+foreach ($tag in $dockerTags) {
+   $dargs += "-t"
+   $dargs += "ghcr.io/alphaleonis/openrgb-server:$tag"
 }
 
-ExecSafe { & $env:DOTNET_EXE build $BuildProjectFile /nodeReuse:false /p:UseSharedCompilation=false -nologo -clp:NoSummary --verbosity quiet }
-ExecSafe { & $env:DOTNET_EXE run --project $BuildProjectFile --no-build -- $BuildArguments }
+if ($tagName) {
+   $dargs += "--build-arg"
+   $dargs += "OPENRGB_VERSION=$tagName"
+}
+
+$dargs += @(
+   "$PSScriptRoot"   
+)
+
+if (!$NoBuild) {
+   Write-Host -ForegroundColor Cyan "docker build $dargs"
+   docker build @dargs
+
+   if ($LASTEXITCODE -ne 0) {
+      Write-Error "Failed to build Docker image."
+      exit 1
+   }   
+}
+
+
+if ($Push) {
+   $PAT | docker login ghcr.io -u alphaleonis --password-stdin
+   if ($LASTEXITCODE -ne 0) {
+      Write-Error "Failed to login to the registry."
+      exit 1
+   }
+
+   $dockerTags | ForEach-Object {
+      $tag = $_
+      docker push "ghcr.io/alphaleonis/openrgb-server:$tag"
+      if ($LASTEXITCODE -ne 0) {
+         Write-Error "Failed to push image to registry."
+         exit 1
+      }
+   }
+}
+
+
