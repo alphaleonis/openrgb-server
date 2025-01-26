@@ -1,33 +1,23 @@
+
+name: Build OpenRGB Docker Image
+
 on:
   workflow_dispatch:
     inputs:
-      logLevel:
-        description: 'Log level'
+      openrgbVersion:
+        description: 'OpenRGB Version'
         required: true
-        default: 'warning'
-        type: choice
-        options:
-        - info
-        - warning
-        - debug
-      tags:
-        description: 'Test scenario tags'
-        required: false
-        type: boolean
-      environment:
-        description: 'Environment to run tests against'
-        type: environment
-        required: true
+        default: 'latest'
+        type: string
 
 jobs:
-  log-the-inputs:
+  build-image:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: pwsh
     steps:
-      - run: |
-          echo "Log level: $LEVEL"
-          echo "Tags: $TAGS"
-          echo "Environment: $ENVIRONMENT"
+      - uses: actions/checkout@v4
+      - run: "& ./build.ps1 -Version ${{ inputs.openrgbVersion }} -Push"
         env:
-          LEVEL: ${{ inputs.logLevel }}
-          TAGS: ${{ inputs.tags }}
-          ENVIRONMENT: ${{ inputs.environment }}
+          GHCR_PAT: ${{ secrets.GITHUB_TOKEN }}
