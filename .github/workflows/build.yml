@@ -19,8 +19,8 @@ name: build
 on:
   workflow_dispatch:
     inputs:
-      Version:
-        description: "Version"
+      OpenRGBVersion:
+        description: "Open RGBVersion"
         required: true
 
 jobs:
@@ -39,4 +39,4 @@ jobs:
       - name: 'Run: Compile, Pack'
         run: ./build.cmd Compile Pack
         env:
-          Version: ${{ github.event.inputs.Version }}
+          OpenRGBVersion: ${{ github.event.inputs.OpenRGBVersion }}

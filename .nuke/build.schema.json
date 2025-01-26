@@ -101,7 +101,7 @@
   "allOf": [
     {
       "properties": {
-        "Version": {
+        "OpenRGBVersion": {
           "type": "string"
         }
       }
