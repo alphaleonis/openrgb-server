@@ -14,12 +14,12 @@ using static Nuke.Common.IO.PathConstruction;
 [GitHubActions("build", 
    GitHubActionsImage.UbuntuLatest,    
    InvokedTargets = new[] { nameof(Compile), nameof(Pack) },
-   OnWorkflowDispatchRequiredInputs = [ "Version" ])]
+   OnWorkflowDispatchRequiredInputs = [ "OpenRGBVersion" ])]
 class Build : NukeBuild
 {
     public static int Main () => Execute<Build>(x => x.Compile);
 
-   [Parameter] readonly string Version;
+   [Parameter] readonly string OpenRGBVersion;
 
     Target Clean => _ => _
         .Before(Restore)
@@ -36,7 +36,7 @@ class Build : NukeBuild
         .DependsOn(Restore)
         .Executes(() =>
         {
-           Console.WriteLine($"Version is: {Version}");
+           Console.WriteLine($"Version is: {OpenRGBVersion}");
         });
 
    Target Pack => _ => _
